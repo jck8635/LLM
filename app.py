@@ -15,6 +15,7 @@ from google import genai
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
+import time
 
 # =========================================================
 # 1. 페이지 설정
@@ -186,22 +187,30 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
 }}
 """
 
-    try:
-        response = gemini_client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=prompt,
-        )
-        content = response.text.strip()
-        
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = gemini_client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+            )
+            content = response.text.strip()
             
-        parsed = json.loads(content)
-        return parsed.get("final_label", label), parsed.get("explanation", content)
-    except Exception as e:
-        return label, f"LLM 심사 중 오류 발생: {str(e)}"
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+                
+            parsed = json.loads(content)
+            return parsed.get("final_label", label), parsed.get("explanation", content)
+            
+        except Exception as e:
+            # 503 에러 등 일시적 오류일 경우 1~2초 대기 후 재시도
+            if attempt < max_retries - 1:
+                time.sleep(2)
+                continue
+            else:
+                return label, f"LLM 심사 중 오류 발생 (재시도 초과): {str(e)}"
 
 
 def classify_and_explain(text: str):
