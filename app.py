@@ -208,10 +208,12 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
 """
 
     try:
-        response = hf_client.chat_completion(
+        # Groq 클라이언트 변수명인 groq_client로 변경
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
             temperature=0.2,
+            max_tokens=500,
         )
         content = response.choices[0].message.content.strip()
         
