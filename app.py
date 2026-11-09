@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import emoji
 from soynlp.normalizer import repeat_normalize
 
-from huggingface_hub import InferenceClient
+from langchain_huggingface import HuggingFaceEndpoint
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
@@ -26,7 +26,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ 유해 표현 / 피싱·광고 탐지 & LLM 설명 대시보드")
-st.caption("KcBERT 분류 + Hugging Face Llama 3.2 + Chroma RAG")
+st.caption("KcBERT 분류 + Hugging Face Endpoint (Gemma-2) + Chroma RAG")
 
 # =========================================================
 # 2. 경로 설정
@@ -65,7 +65,7 @@ def clean_text(text: str) -> str:
 
 
 # =========================================================
-# 4. 리소스 로드 (KcBERT + RAG + Hugging Face Client)
+# 4. 리소스 로드 (KcBERT + RAG + Hugging Face Endpoint)
 # =========================================================
 @st.cache_resource
 def load_kcbert():
@@ -116,16 +116,19 @@ def load_rag_and_client():
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-    # Streamlit Secrets에서 허깅페이스 토큰 안전하게 가져오기
+    # Streamlit Secrets에서 토큰 가져오기
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
 
-    # Llama 3.2 모델 및 승인된 토큰을 사용하는 InferenceClient 생성
-    hf_client = InferenceClient(
-        model="meta-llama/Llama-3.2-3B-Instruct",
-        api_key=hf_api_key
+    # HuggingFaceEndpoint 초기화 (안정적인 모델 활용)
+    llm_endpoint = HuggingFaceEndpoint(
+        repo_id="google/gemma-2-2b-it",
+        task="text-generation",
+        temperature=0.2,
+        max_new_tokens=500,
+        huggingfacehub_api_token=hf_api_key
     )
 
-    return retriever, hf_client
+    return retriever, llm_endpoint
 
 
 try:
@@ -192,12 +195,8 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
 """
 
     try:
-        response = hf_client.chat_completion(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
-            temperature=0.2,
-        )
-        content = response.choices[0].message.content.strip()
+        # Endpoint 호출
+        content = hf_client.invoke(prompt).strip()
         
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
@@ -240,7 +239,7 @@ with tab1:
         if not user_text.strip():
             st.warning("문장을 입력해주세요.")
         else:
-            with st.spinner("KcBERT 분류 및 허깅페이스 Llama 3.2 심층 검토 중..."):
+            with st.spinner("KcBERT 분류 및 허깅페이스 Endpoint 심층 검토 중..."):
                 result = classify_and_explain(user_text)
 
             st.divider()
@@ -268,7 +267,7 @@ with tab1:
             fig.update_layout(yaxis_tickformat=".0%", yaxis_range=[0, 1], showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("### 🤖 LLM 심층 심사 및 설명 (Hugging Face Llama 3.2 + RAG)")
+            st.markdown("### 🤖 LLM 심층 심사 및 설명 (Hugging Face Endpoint + RAG)")
             st.info(result["explanation"])
 
 
@@ -278,10 +277,10 @@ with tab2:
     | 구분 | 모델 | 역할 |
     |------|------|------|
     | 1차 분류 | **KcBERT** | 정상 / 유해 표현 / 피싱·광고 기본 확률 산출 |
-    | 2차 심사 및 설명 | **Llama-3.2-3B-Instruct** (Hugging Face API) | API 기반 심층 검토 및 사유 생성 |
+    | 2차 심사 및 설명 | **Gemma-2-2b-it** (Hugging Face Endpoint) | API 기반 심층 검토 및 사유 생성 |
     | RAG | **Chroma + multilingual MiniLM** | 관련 기준 문서 검색 |
     """)
 
 with tab3:
     st.subheader("사용 가이드")
-    st.markdown("Llama 3.2 모델 약관 승인이 완료된 허깅페이스 토큰을 통해 원활하게 심층 검토가 수행됩니다.")
+    st.markdown("Hugging Face Endpoint를 통해 서버리스 라우팅 에러 없이 안정적으로 LLM 심층 검토가 수행됩니다.")
