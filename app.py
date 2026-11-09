@@ -118,8 +118,10 @@ def load_rag_and_client():
     # 서버리스 Inference API에서 완벽히 지원되는 모델로 변경
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
     
+    # provider="hf-inference"를 추가하여 무료 서버리스 API로 명시적으로 라우팅
     hf_client = InferenceClient(
-        model="HuggingFaceH4/zephyr-7b-beta",
+        model="microsoft/Phi-3-mini-4k-instruct",
+        provider="hf-inference",
         api_key=hf_api_key
     )
     
