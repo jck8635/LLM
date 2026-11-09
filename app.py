@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import emoji
 from soynlp.normalizer import repeat_normalize
 
-from langchain_ollama import ChatOllama
+from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -27,12 +27,12 @@ st.set_page_config(
 )
 
 st.title("🛡️ 유해 표현 / 피싱·광고 탐지 & LLM 설명 대시보드")
-st.caption("KcBERT 분류 + Gemma2 (LLM 심층 검토) + LangChain + Chroma RAG")
+st.caption("KcBERT 분류 + Hugging Face API (Gemma2) + LangChain + Chroma RAG")
 
 # =========================================================
-# 2. 경로 설정
+# 2. 경로 설정 및 API 키 체크
 # =========================================================
-MODEL_PATH = Path("model")  # model 폴더 안에 파일들 넣어둔 상태
+MODEL_PATH = Path("model")  # 또는 허깅페이스 모델 ID
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 id2label = {0: "정상", 1: "유해 표현", 2: "피싱·광고"}
@@ -57,26 +57,16 @@ def clean_text(text: str) -> str:
     if not isinstance(text, str):
         return ""
 
-    # 1. 전각 → 반각
     text = text.translate(FULL2HALF)
-
-    # 2. URL을 [URL]로 치환
     text = url_pattern.sub(" [URL] ", text)
-
-    # 3. 허용 문자 외 제거
     text = pattern.sub(" ", text)
-
-    # 4. 공백 정리
     text = re.sub(r"\s+", " ", text).strip()
-
-    # 5. 반복 문자 정규화
     text = repeat_normalize(text, num_repeats=2)
-
     return text
 
 
 # =========================================================
-# 4. 리소스 로드
+# 4. 리소스 로드 (KcBERT + Hugging Face API LLM + RAG)
 # =========================================================
 @st.cache_resource
 def load_kcbert():
@@ -127,12 +117,15 @@ def load_rag_and_llm():
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-    llm = ChatOllama(
-        model="gemma2:latest",
+    # Hugging Face Inference API 기반으로 Gemma2 호출 (Streamlit Cloud 호환)
+    llm_endpoint = HuggingFaceEndpoint(
+        repo_id="google/gemma-2-2b-it",  # 또는 사용하실 허깅페이스 모델 ID
+        task="text-generation",
         temperature=0.2,
+        max_new_tokens=512,
     )
+    llm = ChatHuggingFace(llm=llm_endpoint)
 
-    # LLM이 직접 최종 판정을 내리고 JSON으로 결과를 출력하도록 프롬프트 수정
     prompt = ChatPromptTemplate.from_template(
         """당신은 유해 콘텐츠와 피싱/광고를 면밀히 심사하는 보안 AI 전문가입니다.
 
@@ -147,10 +140,9 @@ def load_rag_and_llm():
 {context}
 
 [작업 지시사항]
-1. 원문에 **숫자, 특수문자, 초성(ㅅㅂ 등), 은어 등을 섞어서 비속어나 욕설, 성적 모욕을 우회해서 표현한 경우**가 있는지 면밀히 검토하세요.
-2. 원문을 세심하게 분석하여 비속어, 비하, 욕설, 차별적 표현, 또는 의심스러운 피싱·광고 패턴이 포함되어 있는지 직접 검토하세요.
-3. KcBERT가 '정상'으로 판단했더라도, 원문에 숨겨진 유해 표현이나 피싱 징후가 명백하다면 최종 판정을 '유해 표현' 또는 '피싱·광고'로 변경할 수 있습니다.
-4. 반드시 아래의 JSON 형식에 맞춰서만 답변해주세요 (마크다운 코드블록 ```json ... ``` 사용 필수):
+1. 원문을 세심하게 분석하여 비속어, 비하, 욕설, 차별적 표현, 또는 의심스러운 피싱·광고 패턴이 포함되어 있는지 직접 검토하세요.
+2. KcBERT가 '정상'으로 판단했더라도, 원문에 숨겨진 유해 표현이나 피싱 징후가 명백하다면 최종 판정을 '유해 표현' 또는 '피싱·광고'로 변경할 수 있습니다.
+3. 반드시 아래의 JSON 형식에 맞춰서만 답변해주세요 (다른 사족 없이 순수 JSON 형태 또는 마크다운 코드블록 ```json ... ``` 사용):
 
 {{
   "final_label": "정상 또는 유해 표현 또는 피싱·광고 중 택 1",
@@ -170,9 +162,8 @@ except Exception as e:
     st.error(f"모델 또는 RAG/LLM을 불러오는 중 오류가 발생했습니다.\n\n{e}")
     st.info(
         "확인 사항:\n"
-        "1. `model` 폴더에 필수 파일들이 있는지 확인하세요.\n"
-        "2. Ollama가 실행 중이고 `gemma2:latest`가 설치되어 있는지 확인하세요.\n"
-        "3. 필요한 패키지가 설치되어 있는지 확인하세요."
+        "1. Streamlit Cloud 설정(Secrets)에 `HUGGINGFACEHUB_API_TOKEN`이 등록되어 있는지 확인하세요.\n"
+        "2. 필수 패키지들이 설치되어 있는지 확인하세요."
     )
     st.stop()
 
@@ -218,9 +209,7 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
     
     content = response.content.strip()
     
-    # LLM이 출력한 JSON 문자열 파싱 시도 (마크다운 제거 포함)
     try:
-        # ```json ... ``` 블록 제거
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
@@ -229,40 +218,32 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
         parsed = json.loads(content)
         return parsed.get("final_label", label), parsed.get("explanation", content)
     except Exception:
-        # JSON 파싱 실패 시 기본 텍스트 처리 안전장치
         return label, content
 
 
 def classify_and_explain(text: str):
-    # 1단계: KcBERT 모델 추론
     kc_result = classify(text)
-    
-    # 2단계: Gemma2 LLM을 통한 심층 검토 및 최종 판정 수정
     final_label, explanation = generate_llm_judgment(
         text=text,
         label=kc_result["label"],
         confidence=kc_result["confidence"]
     )
-    
     kc_result["final_label"] = final_label
     kc_result["explanation"] = explanation
     return kc_result
 
 
 # =========================================================
-# 6. 탭 구성
+# 6. 탭 구성 (UI)
 # =========================================================
 tab1, tab2, tab3 = st.tabs(["🔍 실시간 탐지 + LLM 심층 판단", "📊 모델 정보", "💡 사용 가이드"])
 
-# ---------------------------------------------------------
-# TAB 1: 실시간 탐지 + 심층 판단
-# ---------------------------------------------------------
 with tab1:
     st.subheader("문장 실시간 분석 + LLM 최종 심사")
 
     user_text = st.text_area(
         "분석할 문장을 입력하세요.",
-        placeholder="예: 은근히 약올리네? 이거 신고해야 하나...",
+        placeholder="예: 지금 바로 클릭해서 무료로 받아가세요!",
         height=130
     )
 
@@ -270,83 +251,48 @@ with tab1:
         if not user_text.strip():
             st.warning("문장을 입력해주세요.")
         else:
-            with st.spinner("KcBERT 1차 분류 중... + Gemma2가 문장을 심층 검토하고 있습니다..."):
+            with st.spinner("KcBERT 분류 및 허깅페이스 Gemma2 API 심층 검토 중..."):
                 result = classify_and_explain(user_text)
 
             st.divider()
 
-            # 최종 판정 (LLM이 교정한 결과 우선 반영)
             final_label = result["final_label"]
             if final_label == "정상":
                 st.success(f"✅ **최종 판정: 정상** (KcBERT 1차 예측: {result['label']} / 신뢰도: {result['confidence']*100:.1f}%)")
             else:
                 st.error(f"🚨 **최종 판정: {final_label}** (KcBERT 1차 예측: {result['label']} / 신뢰도: {result['confidence']*100:.1f}%)")
 
-            # 확률 메트릭
             c1, c2, c3 = st.columns(3)
-            c1.metric("정상 확률 (KcBERT)", f"{result['probs'][0]*100:.1f}%")
-            c2.metric("유해 표현 확률 (KcBERT)", f"{result['probs'][1]*100:.1f}%")
-            c3.metric("피싱·광고 확률 (KcBERT)", f"{result['probs'][2]*100:.1f}%")
+            c1.metric("정상 확률", f"{result['probs'][0]*100:.1f}%")
+            c2.metric("유해 표현 확률", f"{result['probs'][1]*100:.1f}%")
+            c3.metric("피싱·광고 확률", f"{result['probs'][2]*100:.1f}%")
 
-            # 확률 바 차트
             prob_df = pd.DataFrame({
                 "클래스": ["정상", "유해 표현", "피싱·광고"],
                 "확률": result["probs"]
             })
             fig = px.bar(
-                prob_df,
-                x="클래스",
-                y="확률",
-                text_auto=".1%",
-                title="KcBERT 모델별 클래스 예측 확률",
-                color="클래스",
+                prob_df, x="클래스", y="확률", text_auto=".1%",
+                title="KcBERT 클래스별 예측 확률", color="클래스",
                 color_discrete_sequence=["#00CC96", "#EF553B", "#FFA15A"]
             )
             fig.update_layout(yaxis_tickformat=".0%", yaxis_range=[0, 1], showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
-            # LLM 심층 분석 설명
-            st.markdown("### 🤖 LLM 심층 심사 및 설명 (Gemma2 + RAG)")
+            st.markdown("### 🤖 LLM 심층 심사 및 설명 (Hugging Face API + RAG)")
             st.info(result["explanation"])
 
-            with st.expander("상세 정보 보기"):
-                st.write("**전처리된 텍스트:**", result["cleaned_text"])
-                st.write("**KcBERT 원본 예측 라벨:**", result["label"])
-                st.write("**LLM 최종 교정 라벨:**", result["final_label"])
-                st.json({
-                    "kcbert_label": result["label"],
-                    "final_label": result["final_label"],
-                    "confidence": round(result["confidence"], 4),
-                    "probs": {
-                        "정상": round(float(result["probs"][0]), 4),
-                        "유해 표현": round(float(result["probs"][1]), 4),
-                        "피싱·광고": round(float(result["probs"][2]), 4),
-                    }
-                })
 
-
-# ---------------------------------------------------------
-# TAB 2: 모델 정보
-# ---------------------------------------------------------
 with tab2:
     st.subheader("사용 모델 정보")
-
     st.markdown("""
     | 구분 | 모델 | 역할 |
     |------|------|------|
-    | 1차 분류 | **KcBERT** (fine-tuned) | 정상 / 유해 표현 / 피싱·광고 기본 확률 산출 |
-    | 2차 심사 및 설명 | **Gemma2:latest** (Ollama) | 1차 결과를 검토하여 최종 판정 수정 및 자연어 사유 생성 |
-    | RAG | **Chroma + multilingual MiniLM** | 유해성 판단 기준 및 패턴 문서 검색 |
-    | 오케스트레이션 | **LangChain** | 프롬프트 + LLM + Retriever 연결 |
+    | 1차 분류 | **KcBERT** | 정상 / 유해 표현 / 피싱·광고 기본 확률 산출 |
+    | 2차 심사 및 설명 | **Gemma-2-2b-it** (Hugging Face API) | API 기반 심층 검토 및 사유 생성 |
+    | RAG | **Chroma + multilingual MiniLM** | 관련 기준 문서 검색 |
     """)
 
-
-# ---------------------------------------------------------
-# TAB 3: 사용 가이드
-# ---------------------------------------------------------
 with tab3:
-    st.subheader("사용 및 실행 가이드")
-    st.markdown("""
-    - KcBERT가 놓친 미묘한 유해 표현이나 숨겨진 피싱 패턴을 LLM(Gemma2)이 최종 단계에서 교정하도록 확장되었습니다.
-    - 대시보드의 **최종 판정 결과**는 LLM의 심층 검토 결과가 반영되어 출력됩니다.
-    """)
+    st.subheader("사용 가이드")
+    st.markdown("Hugging Face API를 통해 클라우드 환경에서도 LLM 심층 검토 기능이 원활히 작동합니다.")
