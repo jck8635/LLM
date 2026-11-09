@@ -119,7 +119,7 @@ def load_rag_and_llm():
 
     # Hugging Face Inference API 기반으로 Gemma2 호출 (Streamlit Cloud 호환)
     llm_endpoint = HuggingFaceEndpoint(
-        repo_id="google/gemma-2-2b-it",  # 또는 사용하실 허깅페이스 모델 ID
+        repo_id="Qwen/Qwen2.5-1.5B-Instruct",  # 호환성이 매우 좋은 가볍고 똑똑한 모델
         task="text-generation",
         temperature=0.2,
         max_new_tokens=512,
