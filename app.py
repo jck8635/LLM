@@ -11,8 +11,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import emoji
 from soynlp.normalizer import repeat_normalize
 
-from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
-from langchain_core.prompts import ChatPromptTemplate
+from huggingface_hub import InferenceClient
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
@@ -27,12 +26,12 @@ st.set_page_config(
 )
 
 st.title("🛡️ 유해 표현 / 피싱·광고 탐지 & LLM 설명 대시보드")
-st.caption("KcBERT 분류 + Hugging Face API (Gemma2) + LangChain + Chroma RAG")
+st.caption("KcBERT 분류 + Hugging Face InferenceClient (Qwen) + Chroma RAG")
 
 # =========================================================
-# 2. 경로 설정 및 API 키 체크
+# 2. 경로 설정
 # =========================================================
-MODEL_PATH = Path("model")  # 또는 허깅페이스 모델 ID
+MODEL_PATH = Path("model")  # 로컬 모델 폴더 경로
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 id2label = {0: "정상", 1: "유해 표현", 2: "피싱·광고"}
@@ -42,7 +41,7 @@ id2label = {0: "정상", 1: "유해 표현", 2: "피싱·광고"}
 # 3. 전처리 함수
 # =========================================================
 FULL2HALF = str.maketrans(
-    "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ！＂＃＄％＆＇（）＊＋，－．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～ ",
+    "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ！＂＃＄⟦％＆＇（）＊＋，－．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～ ",
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ "
 )
 
@@ -66,7 +65,7 @@ def clean_text(text: str) -> str:
 
 
 # =========================================================
-# 4. 리소스 로드 (KcBERT + Hugging Face API LLM + RAG)
+# 4. 리소스 로드 (KcBERT + RAG + Hugging Face Client)
 # =========================================================
 @st.cache_resource
 def load_kcbert():
@@ -78,7 +77,7 @@ def load_kcbert():
 
 
 @st.cache_resource
-def load_rag_and_llm():
+def load_rag_and_client():
     rag_documents = [
         Document(
             page_content="욕설, 비하, 차별, 성적 모욕, 혐오 발언이 포함된 경우 유해 표현으로 분류한다.",
@@ -117,59 +116,22 @@ def load_rag_and_llm():
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-    # Hugging Face Inference API 기반으로 Gemma2 호출 (Streamlit Cloud 호환)
-    llm_endpoint = HuggingFaceEndpoint(
-        repo_id="Qwen/Qwen2.5-1.5B-Instruct",  # 호환성이 매우 좋은 가볍고 똑똑한 모델
-        task="text-generation",
-        temperature=0.2,
-        max_new_tokens=512,
-    )
-    llm = ChatHuggingFace(llm=llm_endpoint)
+    # 허깅페이스 공식 InferenceClient 초기화 (Streamlit Secrets의 토큰 자동 인식)
+    hf_client = InferenceClient(model="Qwen/Qwen2.5-1.5B-Instruct")
 
-    prompt = ChatPromptTemplate.from_template(
-        """당신은 유해 콘텐츠와 피싱/광고를 면밀히 심사하는 보안 AI 전문가입니다.
-
-[KcBERT 1차 분류 결과]
-- 예측 라벨: {label}
-- 신뢰도: {confidence:.1%}
-
-[원문]
-{text}
-
-[참고할 수 있는 관련 지식]
-{context}
-
-[작업 지시사항]
-1. 원문을 세심하게 분석하여 비속어, 비하, 욕설, 차별적 표현, 또는 의심스러운 피싱·광고 패턴이 포함되어 있는지 직접 검토하세요.
-2. KcBERT가 '정상'으로 판단했더라도, 원문에 숨겨진 유해 표현이나 피싱 징후가 명백하다면 최종 판정을 '유해 표현' 또는 '피싱·광고'로 변경할 수 있습니다.
-3. 반드시 아래의 JSON 형식에 맞춰서만 답변해주세요 (다른 사족 없이 순수 JSON 형태 또는 마크다운 코드블록 ```json ... ``` 사용):
-
-{{
-  "final_label": "정상 또는 유해 표현 또는 피싱·광고 중 택 1",
-  "explanation": "왜 이런 최종 판정을 내렸는지 구체적인 근거를 포함하여 3~5문장 내외로 작성"
-}}
-"""
-    )
-
-    chain = prompt | llm
-    return retriever, chain
+    return retriever, hf_client
 
 
 try:
     tokenizer, model = load_kcbert()
-    retriever, explanation_chain = load_rag_and_llm()
+    retriever, hf_client = load_rag_and_client()
 except Exception as e:
-    st.error(f"모델 또는 RAG/LLM을 불러오는 중 오류가 발생했습니다.\n\n{e}")
-    st.info(
-        "확인 사항:\n"
-        "1. Streamlit Cloud 설정(Secrets)에 `HUGGINGFACEHUB_API_TOKEN`이 등록되어 있는지 확인하세요.\n"
-        "2. 필수 패키지들이 설치되어 있는지 확인하세요."
-    )
+    st.error(f"모델 또는 RAG/클라이언트를 불러오는 중 오류가 발생했습니다.\n\n{e}")
     st.stop()
 
 
 # =========================================================
-# 5. 분류 + LLM 심층 판단 함수
+# 5. 분류 및 LLM 심층 판단 함수
 # =========================================================
 def classify(text: str):
     cleaned = clean_text(text)
@@ -200,16 +162,37 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
     docs = retriever.invoke(text)
     context = "\n".join([f"- {doc.page_content}" for doc in docs])
 
-    response = explanation_chain.invoke({
-        "text": text,
-        "label": label,
-        "confidence": confidence,
-        "context": context
-    })
-    
-    content = response.content.strip()
-    
+    prompt = f"""당신은 유해 콘텐츠와 피싱/광고를 면밀히 심사하는 보안 AI 전문가입니다.
+
+[KcBERT 1차 분류 결과]
+- 예측 라벨: {label}
+- 신뢰도: {confidence:.1%}
+
+[원문]
+{text}
+
+[참고할 수 있는 관련 지식]
+{context}
+
+[작업 지시사항]
+1. 원문을 세심하게 분석하여 비속어, 비하, 욕설, 차별적 표현, 또는 의심스러운 피싱·광고 패턴이 포함되어 있는지 직접 검토하세요.
+2. KcBERT가 '정상'으로 판단했더라도, 원문에 숨겨진 유해 표현이나 피싱 징후가 명백하다면 최종 판정을 '유해 표현' 또는 '피싱·광고'로 변경할 수 있습니다.
+3. 반드시 아래의 JSON 형식에 맞춰서만 답변해주세요 (마크다운 코드블록 ```json ... ``` 사용):
+
+{{
+  "final_label": "정상 또는 유해 표현 또는 피싱·광고 중 택 1",
+  "explanation": "왜 이런 최종 판정을 내렸는지 구체적인 근거를 포함하여 3~5문장 내외로 작성"
+}}
+"""
+
     try:
+        response = hf_client.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.2,
+        )
+        content = response.choices[0].message.content.strip()
+        
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
@@ -217,8 +200,8 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
             
         parsed = json.loads(content)
         return parsed.get("final_label", label), parsed.get("explanation", content)
-    except Exception:
-        return label, content
+    except Exception as e:
+        return label, f"LLM 심사 중 오류 발생: {str(e)}"
 
 
 def classify_and_explain(text: str):
@@ -251,7 +234,7 @@ with tab1:
         if not user_text.strip():
             st.warning("문장을 입력해주세요.")
         else:
-            with st.spinner("KcBERT 분류 및 허깅페이스 Gemma2 API 심층 검토 중..."):
+            with st.spinner("KcBERT 분류 및 허깅페이스 API 심층 검토 중..."):
                 result = classify_and_explain(user_text)
 
             st.divider()
@@ -289,10 +272,10 @@ with tab2:
     | 구분 | 모델 | 역할 |
     |------|------|------|
     | 1차 분류 | **KcBERT** | 정상 / 유해 표현 / 피싱·광고 기본 확률 산출 |
-    | 2차 심사 및 설명 | **Gemma-2-2b-it** (Hugging Face API) | API 기반 심층 검토 및 사유 생성 |
+    | 2차 심사 및 설명 | **Qwen2.5-1.5B-Instruct** (Hugging Face API) | API 기반 심층 검토 및 사유 생성 |
     | RAG | **Chroma + multilingual MiniLM** | 관련 기준 문서 검색 |
     """)
 
 with tab3:
     st.subheader("사용 가이드")
-    st.markdown("Hugging Face API를 통해 클라우드 환경에서도 LLM 심층 검토 기능이 원활히 작동합니다.")
+    st.markdown("Hugging Face 공식 `InferenceClient`를 통해 클라우드 환경에서도 에러 없이 LLM 심층 검토 기능이 작동합니다.")
