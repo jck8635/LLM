@@ -188,7 +188,7 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
 
     try:
         response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=prompt,
         )
         content = response.text.strip()
