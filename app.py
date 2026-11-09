@@ -15,7 +15,7 @@ from huggingface_hub import InferenceClient
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
-
+from groq import Groq
 # =========================================================
 # 1. 페이지 설정
 # =========================================================
@@ -78,63 +78,79 @@ def load_kcbert():
 @st.cache_resource
 def load_rag_and_client():
     rag_documents = [
-        Document(
-            page_content="욕설, 비하, 차별, 성적 모욕, 혐오 발언이 포함된 경우 유해 표현으로 분류한다.",
-            metadata={"label": "유해 표현"}
-        ),
-        Document(
-            page_content="특정 개인이나 집단을 비난하거나 조롱하는 표현은 유해 표현에 해당한다.",
-            metadata={"label": "유해 표현"}
-        ),
-        Document(
-            page_content="무료 제공, 클릭 유도, 짧은 링크, 계좌 이체 요구, 개인정보 입력 유도 등은 피싱·광고의 전형적인 패턴이다.",
-            metadata={"label": "피싱·광고"}
-        ),
-        Document(
-            page_content="의심스러운 URL, 비트링크, '지금 바로', '한정 특가', '당첨' 등의 문구가 있으면 피싱·광고 가능성이 높다.",
-            metadata={"label": "피싱·광고"}
-        ),
-        Document(
-            page_content="일상적인 대화, 질문, 정보 공유, 감정 표현 등은 정상으로 분류한다.",
-            metadata={"label": "정상"}
-        ),
-        Document(
-            page_content="단순한 비속어 하나가 있어도 전체 맥락이 공격적이지 않으면 정상일 수 있다.",
-            metadata={"label": "정상"}
-        ),
+        Document(page_content="욕설, 비하, 차별, 성적 모욕, 혐오 발언이 포함된 경우 유해 표현으로 분류한다.", metadata={"label": "유해 표현"}),
+        Document(page_content="특정 개인이나 집단을 비난하거나 조롱하는 표현은 유해 표현에 해당한다.", metadata={"label": "유해 표현"}),
+        Document(page_content="무료 제공, 클릭 유도, 짧은 링크, 계좌 이체 요구, 개인정보 입력 유도 등은 피싱·광고의 전형적인 패턴이다.", metadata={"label": "피싱·광고"}),
+        Document(page_content="의심스러운 URL, 비트링크, '지금 바로', '한정 특가', '당첨' 등의 문구가 있으면 피싱·광고 가능성이 높다.", metadata={"label": "피싱·광고"}),
+        Document(page_content="일상적인 대화, 질문, 정보 공유, 감정 표현 등은 정상으로 분류한다.", metadata={"label": "정상"}),
+        Document(page_content="단순한 비속어 하나가 있어도 전체 맥락이 공격적이지 않으면 정상일 수 있다.", metadata={"label": "정상"}),
     ]
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    )
-
-    vectorstore = Chroma.from_documents(
-        documents=rag_documents,
-        embedding=embeddings,
-        persist_directory="./chroma_db"
-    )
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    vectorstore = Chroma.from_documents(documents=rag_documents, embedding=embeddings, persist_directory="./chroma_db")
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-    
-    # 서버리스 Inference API에서 완벽히 지원되는 모델로 변경
-    hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
-    
-    # provider="hf-inference"를 추가하여 무료 서버리스 API로 명시적으로 라우팅
-    hf_client = InferenceClient(
-        model="microsoft/Phi-3-mini-4k-instruct",
-        provider="hf-inference",
-        api_key=hf_api_key
-    )
-    
-    return retriever, hf_client
 
+    # Groq 클라이언트 초기화 (Streamlit Secrets에서 자동 로드)
+    groq_api_key = st.secrets.get("GROQ_API_KEY", None)
+    groq_client = Groq(api_key=groq_api_key)
+
+    return retriever, groq_client
 
 try:
     tokenizer, model = load_kcbert()
-    retriever, hf_client = load_rag_and_client()
+    retriever, groq_client = load_rag_and_client()
 except Exception as e:
-    st.error(f"모델 또는 RAG/클라이언트를 불러오는 중 오류가 발생했습니다.\n\n{e}")
+    st.error(f"오류 발생: {e}")
     st.stop()
 
+# ... (classify 함수는 기존과 동일) ...
+
+def generate_llm_judgment(text: str, label: str, confidence: float):
+    docs = retriever.invoke(text)
+    context = "\n".join([f"- {doc.page_content}" for doc in docs])
+
+    prompt = f"""당신은 유해 콘텐츠와 피싱/광고를 면밀히 심사하는 보안 AI 전문가입니다.
+
+[KcBERT 1차 분류 결과]
+- 예측 라벨: {label}
+- 신뢰도: {confidence:.1%}
+
+[원문]
+{text}
+
+[참고할 수 있는 관련 지식]
+{context}
+
+[작업 지시사항]
+1. 원문을 세심하게 분석하여 비속어, 비하, 욕설, 차별적 표현, 또는 의심스러운 피싱·광고 패턴이 포함되어 있는지 직접 검토하세요.
+2. KcBERT가 '정상'으로 판단했더라도, 원문에 숨겨진 유해 표현이나 피싱 징후가 명백하다면 최종 판정을 '유해 표현' 또는 '피싱·광고'로 변경할 수 있습니다.
+3. 반드시 아래의 JSON 형식에 맞춰서만 답변해주세요 (마크다운 코드블록 ```json ... ``` 사용):
+
+{{
+  "final_label": "정상 또는 유해 표현 또는 피싱·광고 중 택 1",
+  "explanation": "왜 이런 최종 판정을 내렸는지 구체적인 근거를 포함하여 3~5문장 내외로 작성"
+}}
+"""
+
+    try:
+        # Groq의 초고속 Llama-3 모델 호출
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=500,
+        )
+        content = response.choices[0].message.content.strip()
+        
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+            
+        parsed = json.loads(content)
+        return parsed.get("final_label", label), parsed.get("explanation", content)
+    except Exception as e:
+        return label, f"LLM 심사 중 오류 발생: {str(e)}"
 
 # =========================================================
 # 5. 분류 및 LLM 심층 판단 함수
