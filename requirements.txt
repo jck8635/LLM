@@ -5,9 +5,8 @@ plotly
 transformers
 emoji
 soynlp
-groq
+langchain-huggingface
 langchain-community
 langchain-core
 sentence-transformers
 chromadb
-huggingface_hub
