@@ -119,7 +119,7 @@ def load_rag_and_client():
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
     
     hf_client = InferenceClient(
-        model="microsoft/Phi-3-mini-4k-instruct", # 별도 동의 없이 API 호출이 잘 되는 모델
+        model="HuggingFaceH4/zephyr-7b-beta",
         api_key=hf_api_key
     )
     
