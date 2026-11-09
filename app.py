@@ -119,7 +119,7 @@ def load_rag_and_client():
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
     
     hf_client = InferenceClient(
-        model="google/gemma-2-2b-it",  # 가볍고 API 지원이 매우 안정적임
+        model="meta-llama/Llama-3.2-3B-Instruct",
         api_key=hf_api_key
     )
     
