@@ -114,13 +114,12 @@ def load_rag_and_client():
         persist_directory="./chroma_db"
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-
-    # 허깅페이스 공식 InferenceClient 초기화 (Streamlit Secrets의 토큰 자동 인식)
-    # 수정 후 (Streamlit Secrets에서 토큰을 안전하게 가져와 주입)
+    
+    # 서버리스 Inference API에서 완벽히 지원되는 모델로 변경
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
     
     hf_client = InferenceClient(
-        model="Qwen/Qwen2.5-1.5B-Instruct",
+        model="Qwen/Qwen2.5-Coder-7B-Instruct",  # 또는 "meta-llama/Llama-3.2-3B-Instruct"
         api_key=hf_api_key
     )
     
