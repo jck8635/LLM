@@ -5,7 +5,7 @@ plotly
 transformers
 emoji
 soynlp
-langchain-ollama
+langchain-huggingface
 langchain-community
 langchain-core
 sentence-transformers
