@@ -10,4 +10,3 @@ langchain-community
 langchain-core
 sentence-transformers
 chromadb
-google-genai
