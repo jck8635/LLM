@@ -11,12 +11,10 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import emoji
 from soynlp.normalizer import repeat_normalize
 
-from langchain_huggingface import HuggingFaceEndpoint
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_community.llms import HuggingFaceHub
-import json
 
 # =========================================================
 # 1. 페이지 설정
@@ -28,7 +26,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ 유해 표현 / 피싱·광고 탐지 & LLM 설명 대시보드")
-st.caption("KcBERT 분류 + Hugging Face Endpoint (Text Generation) + Chroma RAG")
+st.caption("KcBERT 분류 + Hugging Face Hub (Text Generation 우회) + Chroma RAG")
 
 # =========================================================
 # 2. 경로 설정
@@ -67,7 +65,7 @@ def clean_text(text: str) -> str:
 
 
 # =========================================================
-# 4. 리소스 로드 (KcBERT + RAG + HuggingFaceEndpoint)
+# 4. 리소스 로드 (KcBERT + RAG + HuggingFaceHub)
 # =========================================================
 @st.cache_resource
 def load_kcbert():
@@ -121,7 +119,7 @@ def load_rag_and_llm():
     # Streamlit Secrets에서 토큰 가져오기
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
 
-    # HuggingFaceHub를 사용하여 순수 텍스트 생성 모드로 강제 호출합니다.
+    # HuggingFaceHub를 사용하여 순수 텍스트 생성 모드로 강제 호출합니다 (제한 우회)
     llm_endpoint = HuggingFaceHub(
         repo_id="google/gemma-2-2b-it",
         huggingfacehub_api_token=hf_api_key,
@@ -131,8 +129,8 @@ def load_rag_and_llm():
         }
     )
 
-
-    return retriever, llm
+    # 변수 이름 불일치 버그 수정 (llm -> llm_endpoint)
+    return retriever, llm_endpoint
 
 
 try:
@@ -205,6 +203,7 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
         response = llm_endpoint.invoke(prompt)
         content = response.strip()
         
+        # 파싱 문자열 처리 로직 안전하게 최적화
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
@@ -226,7 +225,6 @@ def classify_and_explain(text: str):
     kc_result["final_label"] = final_label
     kc_result["explanation"] = explanation
     return kc_result
-
 
 # =========================================================
 # 6. 탭 구성 (UI)
