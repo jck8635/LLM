@@ -120,7 +120,7 @@ def load_rag_and_llm():
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
 
     llm = HuggingFaceEndpoint(
-    repo_id="google/gemma-2-2b-it",
+    repo_id="google/gemma-4-E2B-it",
     task="conversational",  # 에러 메시지가 지시한 대로 변경
     temperature=0.2,
     max_new_tokens=500,
