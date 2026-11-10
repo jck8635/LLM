@@ -9,4 +9,5 @@ langchain
 langchain-core
 langchain-huggingface
 langchain-chroma
+chroma
 sentence-transformers
