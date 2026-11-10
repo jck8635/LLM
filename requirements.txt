@@ -12,3 +12,4 @@ langchain_ollama
 sentence-transformers
 chromadb
 google-genai
+groq
