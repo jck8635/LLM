@@ -39,7 +39,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 id2label = {0: "정상", 1: "유해 표현", 2: "피싱·광고"}
 
 # 배포 환경을 고려하여 st.secrets에서 키를 가져오도록 하되, 파일의 실제 키를 기본값으로 지정
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "this is your key")
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
 
 
