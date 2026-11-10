@@ -123,9 +123,9 @@ def load_rag_and_llm():
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-    # 허깅페이스 Inference API를 통한 Gemma-2-9B-IT 연동
+    # 수정 후 (서버리스 API 지원 모델로 변경)
     hf_endpoint = HuggingFaceEndpoint(
-        repo_id="google/gemma-2-9b-it",
+        repo_id="meta-llama/Llama-3.1-8B-Instruct",
         task="text-generation",
         temperature=0.2,
         max_new_tokens=512,
