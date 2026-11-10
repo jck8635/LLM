@@ -119,13 +119,12 @@ def load_rag_and_llm():
     # Streamlit Secrets에서 토큰 가져오기
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
 
-    # 챗 래퍼 대신 순수 텍스트 생성 엔드포인트 사용 (메타데이터 검증 에러 우회)
     llm = HuggingFaceEndpoint(
-        repo_id="google/gemma-2-2b-it",  # 안정적인 모델 ID (원하시는 경우 다른 모델로 변경 가능)
-        task="text-generation",
-        temperature=0.2,
-        max_new_tokens=500,
-        huggingfacehub_api_token=hf_api_key
+    repo_id="google/gemma-2-2b-it",
+    task="conversational",  # 에러 메시지가 지시한 대로 변경
+    temperature=0.2,
+    max_new_tokens=500,
+    huggingfacehub_api_token=hf_api_key
     )
 
     return retriever, llm
