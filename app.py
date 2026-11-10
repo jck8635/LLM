@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ 유해 표현 / 피싱·광고 탐지 & LLM 설명 대시보드")
-st.caption("KcBERT 분류 + Groq Qwen 3.8 (LLM 심층 검토) + LangChain + Chroma RAG")
+st.caption("KcBERT 분류 + gpt-oss-20b (LLM 심층 검토) + LangChain + Chroma RAG")
 
 # =========================================================
 # 2. 경로 및 보안 정보 설정
@@ -123,7 +123,7 @@ def load_rag_and_llm():
         embedding=embeddings,
         persist_directory="./chroma_db"
     )
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
     # Groq 공식 클라이언트 객체 초기화
     groq_client = Groq(api_key=GROQ_API_KEY)
@@ -206,7 +206,7 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
 
     response = groq_client.chat.completions.create(
         messages=[{"role": "user", "content": formatted_prompt}],
-        model="qwen/qwen3.8-27b",
+        model="openai/gpt-oss-20b",
         temperature=0.2
     )
     
@@ -254,7 +254,7 @@ with tab1:
         if not user_text.strip():
             st.warning("문장을 입력해주세요.")
         else:
-            with st.spinner("KcBERT 1차 분류 중... + Qwen 3.8 모델이 문장을 심층 검토하고 있습니다..."):
+            with st.spinner("KcBERT 1차 분류 중... + gpt-oss-20b 모델이 문장을 심층 검토하고 있습니다..."):
                 result = classify_and_explain(user_text)
 
             st.divider()
@@ -282,7 +282,7 @@ with tab1:
             fig.update_layout(yaxis_tickformat=".0%", yaxis_range=[0, 1], showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("### 🤖 LLM 심층 심사 및 설명 (Qwen 3.8 + RAG)")
+            st.markdown("### 🤖 LLM 심층 심사 및 설명 (gpt-oss-20b + RAG)")
             st.info(result["explanation"])
 
 with tab2:
@@ -292,7 +292,7 @@ with tab2:
     | 구분 | 모델 | 역할 |
     |------|------|------|
     | 1차 분류 | **KcBERT** (fine-tuned) | 정상 / 유해 표현 / 피싱·광고 기본 확률 산출 |
-    | 2차 심사 및 설명 | **Qwen 3.8 27B** (Groq Cloud) | 1차 결과를 검토하여 최종 판정 수정 및 자연어 사유 생성 |
+    | 2차 심사 및 설명 | **gpt-oss-20b** (Groq Cloud) | 1차 결과를 검토하여 최종 판정 수정 및 자연어 사유 생성 |
     | RAG | **Chroma + multilingual MiniLM** | 유해성 판단 기준 및 패턴 문서 검색 |
     | 오케스트레이션 | **LangChain & Groq SDK** | 프롬프트 + Groq API + Retriever 연결 |
     """)
@@ -300,5 +300,5 @@ with tab2:
 with tab3:
     st.subheader("사용 및 실행 가이드")
     st.markdown("""
-    - KcBERT가 놓친 미묘한 유해 표현이나 숨겨진 피싱 패턴을 클라우드 기반 초고속 LLM(Qwen 3.8)이 최종 단계에서 안전하고 빠르게 교정하도록 확장되었습니다.
+    - KcBERT가 놓친 미묘한 유해 표현이나 숨겨진 피싱 패턴을 클라우드 기반 LLM(gpt-oss-20b)이 최종 단계에서 안전하고 빠르게 교정하도록 확장되었습니다.
     """)
