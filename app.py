@@ -14,7 +14,7 @@ from soynlp.normalizer import repeat_normalize
 
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint, HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
-from langchain import Chroma
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 # =========================================================
