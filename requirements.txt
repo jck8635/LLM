@@ -1,6 +1,4 @@
-requests
 streamlit
---extra-index-url https://pytorch.org
 torch
 pandas
 plotly
@@ -12,4 +10,4 @@ langchain-community
 langchain-core
 sentence-transformers
 chromadb
-huggingface_hub
+google-genai
