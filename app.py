@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+import requests  # HTTP 통신을 위해 추가
 
 import streamlit as st
 import torch
@@ -14,7 +15,6 @@ from soynlp.normalizer import repeat_normalize
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
-from langchain_community.llms import HuggingFaceHub
 
 # =========================================================
 # 1. 페이지 설정
@@ -26,7 +26,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ 유해 표현 / 피싱·광고 탐지 & LLM 설명 대시보드")
-st.caption("KcBERT 분류 + Hugging Face Hub (Text Generation 우회) + Chroma RAG")
+st.caption("KcBERT 분류 + Hugging Face REST API (패키지 충돌 우회) + Chroma RAG")
 
 # =========================================================
 # 2. 경로 설정
@@ -41,7 +41,7 @@ id2label = {0: "정상", 1: "유해 표현", 2: "피싱·광고"}
 # 3. 전처리 함수
 # =========================================================
 FULL2HALF = str.maketrans(
-    "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ！＂＃＄％＆＇（）＊＋，－．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～ ",
+    "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋ ᆯᄆᄂᄋᄑᄒᄏᄐᄎᄑᄒ!"
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ "
 )
 
@@ -65,7 +65,7 @@ def clean_text(text: str) -> str:
 
 
 # =========================================================
-# 4. 리소스 로드 (KcBERT + RAG + HuggingFaceHub)
+# 4. 리소스 로드 (KcBERT + RAG)
 # =========================================================
 @st.cache_resource
 def load_kcbert():
@@ -77,7 +77,7 @@ def load_kcbert():
 
 
 @st.cache_resource
-def load_rag_and_llm():
+def load_rag_data():
     rag_documents = [
         Document(
             page_content="욕설, 비하, 차별, 성적 모욕, 혐오 발언이 포함된 경우 유해 표현으로 분류한다.",
@@ -115,34 +115,19 @@ def load_rag_and_llm():
         persist_directory="./chroma_db"
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-
-    # Streamlit Secrets에서 토큰 가져오기
-    hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
-
-    # HuggingFaceHub를 사용하여 순수 텍스트 생성 모드로 강제 호출합니다 (제한 우회)
-    llm_endpoint = HuggingFaceHub(
-        repo_id="google/gemma-2-2b-it",
-        huggingfacehub_api_token=hf_api_key,
-        model_kwargs={
-            "temperature": 0.2,
-            "max_new_tokens": 500
-        }
-    )
-
-    # 변수 이름 불일치 버그 수정 (llm -> llm_endpoint)
-    return retriever, llm_endpoint
+    return retriever
 
 
 try:
     tokenizer, model = load_kcbert()
-    retriever, llm_endpoint = load_rag_and_llm()
+    retriever = load_rag_data()
 except Exception as e:
-    st.error(f"모델 또는 엔드포인트를 불러오는 중 오류가 발생했습니다.\n\n{e}")
+    st.error(f"모델 또는 벡터 DB를 불러오는 중 오류가 발생했습니다.\n\n{e}")
     st.stop()
 
 
 # =========================================================
-# 5. 분류 및 LLM 심층 판단 함수
+# 5. 분류 및 LLM 심층 판단 함수 (REST API 직접 구현)
 # =========================================================
 def classify(text: str):
     cleaned = clean_text(text)
@@ -198,19 +183,52 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
 [답변]
 """
 
+    # Streamlit Secrets에서 토큰 안전하게 가져오기
+    hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
+    if not hf_api_key:
+        return label, "LLM 심사 중 오류 발생: Streamlit Secrets에 HUGGINGFACEHUB_API_TOKEN이 설정되지 않았습니다."
+
+    # 패키지 의존성을 우회하는 직접적인 Hugging Face Inference API 호출 구조
+    api_url = "https://huggingface.co"
+    headers = {"Authorization": f"Bearer {hf_api_key}"}
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "temperature": 0.2,
+            "max_new_tokens": 500,
+            "return_full_text": False
+        },
+        "options": {
+            "wait_for_model": True  # 모델이 자고 있을 경우 깨어날 때까지 대기
+        }
+    }
+
     try:
-        # 텍스트 엔드포인트 직접 호출
-        response = llm_endpoint.invoke(prompt)
-        content = response.strip()
+        # HTTP POST 요청 송신
+        response = requests.post(api_url, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
         
-        # 파싱 문자열 처리 로직 안전하게 최적화
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
+        result_data = response.json()
+        
+        # 허깅페이스 응답 형식에 따른 텍스트 추출
+        if isinstance(result_data, list) and len(result_data) > 0:
+            content = result_data[0].get("generated_text", "").strip()
+        elif isinstance(result_data, dict):
+            content = result_data.get("generated_text", "").strip()
+        else:
+            content = str(result_data).strip()
+
+        # 정규표현식을 이용한 보다 안전한 JSON 블록 추출 로직
+        json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
+        if not json_match:
+            json_match = re.search(r"```\s*(\{.*?\})\s*```", content, re.DOTALL)
+            
+        if json_match:
+            content = json_match.group(1).strip()
             
         parsed = json.loads(content)
         return parsed.get("final_label", label), parsed.get("explanation", content)
+        
     except Exception as e:
         return label, f"LLM 심사 중 오류 발생: {str(e)}"
 
@@ -225,6 +243,7 @@ def classify_and_explain(text: str):
     kc_result["final_label"] = final_label
     kc_result["explanation"] = explanation
     return kc_result
+
 
 # =========================================================
 # 6. 탭 구성 (UI)
