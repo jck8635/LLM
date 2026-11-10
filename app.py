@@ -15,7 +15,7 @@ from langchain_huggingface import HuggingFaceEndpoint
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
-
+from langchain_community.llms import HuggingFaceHub
 # =========================================================
 # 1. 페이지 설정
 # =========================================================
@@ -119,12 +119,13 @@ def load_rag_and_llm():
     # Streamlit Secrets에서 토큰 가져오기
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
 
-    llm = HuggingFaceEndpoint(
-    repo_id="google/gemma-4-E2B-it",
-    task="conversational",  # 에러 메시지가 지시한 대로 변경
-    temperature=0.2,
-    max_new_tokens=500,
-    huggingfacehub_api_token=hf_api_key
+    llm = HuggingFaceHub(
+        repo_id="google/gemma-4-E2B-it",
+        huggingfacehub_api_token=hf_api_key,
+        model_kwargs={
+            "temperature": 0.2,
+            "max_new_tokens": 500
+        }
     )
 
     return retriever, llm
