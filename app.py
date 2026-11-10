@@ -1,7 +1,6 @@
 import json
 import re
 from pathlib import Path
-import requests  # HTTP 통신을 위해 추가
 
 import streamlit as st
 import torch
@@ -12,21 +11,23 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import emoji
 from soynlp.normalizer import repeat_normalize
 
+from google import genai
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
+import time
 
 # =========================================================
 # 1. 페이지 설정
 # =========================================================
 st.set_page_config(
-    page_title="유해·피싱 탐지 & LLM 설명 대시보드",
+    page_title="유해·피싱 탐지 & Gemini 심층 설명 대시보드",
     page_icon="🛡️",
     layout="wide"
 )
 
-st.title("🛡️ 유해 표현 / 피싱·광고 탐지 & LLM 설명 대시보드")
-st.caption("KcBERT 분류 + Hugging Face REST API (패키지 충돌 우회) + Chroma RAG")
+st.title("🛡️ 유해 표현 / 피싱·광고 탐지 & LLM 심층 심사 대시보드")
+st.caption("KcBERT 분류 + Google Gemini 2.5 Flash + Chroma RAG")
 
 # =========================================================
 # 2. 경로 설정
@@ -41,7 +42,7 @@ id2label = {0: "정상", 1: "유해 표현", 2: "피싱·광고"}
 # 3. 전처리 함수
 # =========================================================
 FULL2HALF = str.maketrans(
-    "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋ ᆯᄆᄂᄋᄑᄒᄏᄐᄎᄑᄒ!"
+    "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ！＂＃＄％＆＇（）＊＋，－．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～ ",
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ "
 )
 
@@ -65,7 +66,7 @@ def clean_text(text: str) -> str:
 
 
 # =========================================================
-# 4. 리소스 로드 (KcBERT + RAG)
+# 4. 리소스 로드 (KcBERT + RAG + Gemini Client)
 # =========================================================
 @st.cache_resource
 def load_kcbert():
@@ -77,7 +78,7 @@ def load_kcbert():
 
 
 @st.cache_resource
-def load_rag_data():
+def load_rag_and_client():
     rag_documents = [
         Document(
             page_content="욕설, 비하, 차별, 성적 모욕, 혐오 발언이 포함된 경우 유해 표현으로 분류한다.",
@@ -115,19 +116,24 @@ def load_rag_data():
         persist_directory="./chroma_db"
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-    return retriever
+
+    # Google GenAI 클라이언트 초기화 (Streamlit Secrets 자동 인식)
+    gemini_api_key = st.secrets.get("GEMINI_API_KEY", None)
+    gemini_client = genai.Client(api_key=gemini_api_key)
+
+    return retriever, gemini_client
 
 
 try:
     tokenizer, model = load_kcbert()
-    retriever = load_rag_data()
+    retriever, gemini_client = load_rag_and_client()
 except Exception as e:
-    st.error(f"모델 또는 벡터 DB를 불러오는 중 오류가 발생했습니다.\n\n{e}")
+    st.error(f"모델 또는 클라이언트를 불러오는 중 오류가 발생했습니다.\n\n{e}")
     st.stop()
 
 
 # =========================================================
-# 5. 분류 및 LLM 심층 판단 함수 (REST API 직접 구현)
+# 5. 분류 및 LLM 심층 판단 함수
 # =========================================================
 def classify(text: str):
     cleaned = clean_text(text)
@@ -179,58 +185,32 @@ def generate_llm_judgment(text: str, label: str, confidence: float):
   "final_label": "정상 또는 유해 표현 또는 피싱·광고 중 택 1",
   "explanation": "왜 이런 최종 판정을 내렸는지 구체적인 근거를 포함하여 3~5문장 내외로 작성"
 }}
-
-[답변]
 """
 
-    # Streamlit Secrets에서 토큰 안전하게 가져오기
-    hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
-    if not hf_api_key:
-        return label, "LLM 심사 중 오류 발생: Streamlit Secrets에 HUGGINGFACEHUB_API_TOKEN이 설정되지 않았습니다."
-
-    # 패키지 의존성을 우회하는 직접적인 Hugging Face Inference API 호출 구조
-    api_url = "https://huggingface.co"
-    headers = {"Authorization": f"Bearer {hf_api_key}"}
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "temperature": 0.2,
-            "max_new_tokens": 500,
-            "return_full_text": False
-        },
-        "options": {
-            "wait_for_model": True  # 모델이 자고 있을 경우 깨어날 때까지 대기
-        }
-    }
-
-    try:
-        # HTTP POST 요청 송신
-        response = requests.post(api_url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        
-        result_data = response.json()
-        
-        # 허깅페이스 응답 형식에 따른 텍스트 추출
-        if isinstance(result_data, list) and len(result_data) > 0:
-            content = result_data[0].get("generated_text", "").strip()
-        elif isinstance(result_data, dict):
-            content = result_data.get("generated_text", "").strip()
-        else:
-            content = str(result_data).strip()
-
-        # 정규표현식을 이용한 보다 안전한 JSON 블록 추출 로직
-        json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
-        if not json_match:
-            json_match = re.search(r"```\s*(\{.*?\})\s*```", content, re.DOTALL)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = gemini_client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+            )
+            content = response.text.strip()
             
-        if json_match:
-            content = json_match.group(1).strip()
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+                
+            parsed = json.loads(content)
+            return parsed.get("final_label", label), parsed.get("explanation", content)
             
-        parsed = json.loads(content)
-        return parsed.get("final_label", label), parsed.get("explanation", content)
-        
-    except Exception as e:
-        return label, f"LLM 심사 중 오류 발생: {str(e)}"
+        except Exception as e:
+            # 503 에러 등 일시적 오류일 경우 1~2초 대기 후 재시도
+            if attempt < max_retries - 1:
+                time.sleep(2)
+                continue
+            else:
+                return label, f"LLM 심사 중 오류 발생 (재시도 초과): {str(e)}"
 
 
 def classify_and_explain(text: str):
@@ -251,7 +231,7 @@ def classify_and_explain(text: str):
 tab1, tab2, tab3 = st.tabs(["🔍 실시간 탐지 + LLM 심층 판단", "📊 모델 정보", "💡 사용 가이드"])
 
 with tab1:
-    st.subheader("문장 실시간 분석 + LLM 최종 심사")
+    st.subheader("문장 실시간 분석 + Gemini 최종 심사")
 
     user_text = st.text_area(
         "분석할 문장을 입력하세요.",
@@ -263,7 +243,7 @@ with tab1:
         if not user_text.strip():
             st.warning("문장을 입력해주세요.")
         else:
-            with st.spinner("KcBERT 분류 및 허깅페이스 심층 검토 중..."):
+            with st.spinner("KcBERT 분류 및 Gemini 심층 검토 중..."):
                 result = classify_and_explain(user_text)
 
             st.divider()
@@ -291,7 +271,7 @@ with tab1:
             fig.update_layout(yaxis_tickformat=".0%", yaxis_range=[0, 1], showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("### 🤖 LLM 심층 심사 및 설명 (Hugging Face Endpoint + RAG)")
+            st.markdown("### 🤖 LLM 심층 심사 및 설명 (Gemini 2.5 Flash + RAG)")
             st.info(result["explanation"])
 
 
@@ -301,10 +281,10 @@ with tab2:
     | 구분 | 모델 | 역할 |
     |------|------|------|
     | 1차 분류 | **KcBERT** | 정상 / 유해 표현 / 피싱·광고 기본 확률 산출 |
-    | 2차 심사 및 설명 | **Gemma-2-2b-it** (Text Generation Endpoint) | API 기반 심층 검토 및 사유 생성 |
+    | 2차 심사 및 설명 | **Gemini 2.5 Flash** (Google GenAI) | API 기반 심층 검토 및 사유 생성 |
     | RAG | **Chroma + multilingual MiniLM** | 관련 기준 문서 검색 |
     """)
 
 with tab3:
     st.subheader("사용 가이드")
-    st.markdown("텍스트 생성 엔드포인트 방식을 통해 챗 모델 메타데이터 검증 에러 없이 안정적으로 구동됩니다.")
+    st.markdown("Google Gemini API를 활용하여 서버 제약 없이 2차 심층 검증과 설명이 안정적으로 제공됩니다.")
