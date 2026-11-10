@@ -9,5 +9,5 @@ langchain
 langchain-core
 langchain-huggingface
 langchain-chroma
-chroma
+chromadb
 sentence-transformers
