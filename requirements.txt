@@ -1,13 +1,13 @@
 streamlit
 torch
+transformers
 pandas
 plotly
-transformers
 emoji
 soynlp
+sentence-transformers
 langchain
 langchain-core
 langchain-huggingface
 langchain-chroma
 chromadb
-sentence-transformers
