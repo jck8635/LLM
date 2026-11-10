@@ -8,6 +8,7 @@ soynlp
 langchain-huggingface
 langchain-community
 langchain-core
+langchain_ollama
 sentence-transformers
 chromadb
 google-genai
