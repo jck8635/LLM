@@ -16,6 +16,8 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_community.llms import HuggingFaceHub
+import json
+
 # =========================================================
 # 1. 페이지 설정
 # =========================================================
@@ -119,14 +121,16 @@ def load_rag_and_llm():
     # Streamlit Secrets에서 토큰 가져오기
     hf_api_key = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", None)
 
-    llm = HuggingFaceHub(
-        repo_id="google/gemma-4-E2B-it",
+    # HuggingFaceHub를 사용하여 순수 텍스트 생성 모드로 강제 호출합니다.
+    llm_endpoint = HuggingFaceHub(
+        repo_id="google/gemma-2-2b-it",
         huggingfacehub_api_token=hf_api_key,
         model_kwargs={
             "temperature": 0.2,
             "max_new_tokens": 500
         }
     )
+
 
     return retriever, llm
 
