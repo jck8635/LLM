@@ -24,6 +24,7 @@ KcBERT의 1차 텍스트 분류 성능과 Gemma2(Ollama) + RAG의 심층 검증�
 ```text
 .
 ├── app.py                 # Streamlit 메인 애플리케이션 코드
+├── train.ipynb            # 학습 영역
 ├── model/                 # KcBERT 파인튜닝 모델 폴더 (Git LFS 관리 권장)
 │   ├── model.safetensors
 │   ├── config.json
