@@ -32,6 +32,8 @@ KcBERT의 1차 텍스트 분류 성능과 Gemma2(Ollama) + RAG의 심층 검증�
 │   └── tokenizer_config.json
 ├── chroma_db/             # Chroma RAG 벡터 DB (실행 시 자동 생성)
 ├── dataset/               # 학습 및 평가 데이터셋 폴더
+├── requirements.txt
+├── .gitattributes
 ├── .gitignore             # Git 제외 파일 설정
 └── README.md
 
