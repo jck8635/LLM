@@ -2,6 +2,7 @@
 
 KcBERT의 1차 텍스트 분류 성능과 Gemma2(Ollama) + RAG의 심층 검증을 결합하여, 문장의 유해성 및 피싱·광고 여부를 실시간으로 탐지하고 그 이유를 자연어로 설명해 주는 Streamlit 대시보드 애플리케이션입니다.
 
+동영상 시연 영상 : https://youtu.be/txKLPJgzyGY
 ---
 
 ## 🚀 주요 기능
